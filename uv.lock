@@ -142,7 +142,7 @@ wheels = [
 
 [[package]]
 name = "urirun-connector-scanner"
-version = "0.1.2"
+version = "0.1.3"
 source = { editable = "." }
 
 [package.optional-dependencies]
