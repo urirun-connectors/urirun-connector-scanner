@@ -1,3 +1,4 @@
+.env.example
 __pycache__/
 *.pyc
 *.egg-info/
@@ -5,3 +6,6 @@ dist/
 build/
 .venv/
 .pytest_cache/
+
+# Environment variables
+.env
