@@ -9,3 +9,4 @@ build/
 
 # Environment variables
 .env
+.code2llm_cache
