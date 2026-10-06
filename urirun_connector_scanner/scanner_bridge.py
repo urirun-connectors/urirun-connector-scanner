@@ -1090,6 +1090,20 @@ def auto_crop_receipt(path: Path) -> dict:
     return detect_document_crop(path, output_path=path.with_name(f"{path.stem}-receipt-crop.jpg"))
 
 
+def fast_candidate_crop(path: Path) -> dict:
+    """Fast geometric detection for transient candidate sampling (no heavy orient/text boundary)."""
+    try:
+        from urirun_connector_smart_crop import detect_document_crop
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "reason": f"smart-crop connector unavailable: {exc}", "originalPath": str(path)}
+    return detect_document_crop(
+        path,
+        save=False,
+        auto_orient=False,
+        use_text_boundary=False,
+    )
+
+
 def capture_ocr_and_detect(path: Path, display_path: Path, payload: dict, archive: bool,
                             *, local_image_ocr: Any, extract_document_metadata: Any,
                             truthy_env: Any) -> tuple[dict, dict]:
@@ -1142,6 +1156,7 @@ def scanner_capture(
     prune_scanner_staging(_scanner_staging_dir)
     mode = str(payload.get("mode") or "").lower()
     archive = not (payload.get("archive") is False or mode in {"candidate", "best-candidate", "analyze", "analysis"})
+    is_candidate_sampling = not archive and mode in {"candidate", "best-candidate"}
     mime, raw, digest, ext = _decode_capture_image(str(payload.get("image") or ""))
     root = _scanner_staging_dir()
     root.mkdir(parents=True, exist_ok=True)
@@ -1149,7 +1164,9 @@ def scanner_capture(
     name = f"{_time.strftime('%Y%m%dT%H%M%SZ', _time.gmtime())}-phone-scan-{digest[:12]}{ext}"
     path = root / name
     path.write_bytes(raw)
-    _crop_fn = auto_crop_receipt_fn if auto_crop_receipt_fn is not None else auto_crop_receipt
+    _crop_fn = auto_crop_receipt_fn if auto_crop_receipt_fn is not None else (
+        fast_candidate_crop if is_candidate_sampling else auto_crop_receipt
+    )
     crop = _crop_fn(path)
     display_path = capture_display_path(crop, path)
     ocr, detected_document = capture_ocr_and_detect(
@@ -1239,6 +1256,8 @@ def scanner_best_finish(
     archive_fn: "Callable[..., dict]",
     local_image_ocr_fn: "Callable[..., dict]",
     truthy_env_fn: "Callable[[str, str], Any]",
+    auto_crop_receipt_fn: "Callable[..., dict] | None" = None,
+    extract_document_metadata_fn: "Callable[..., dict] | None" = None,
 ) -> dict:
     prune_scanner_staging(_scanner_staging_dir)
     series_id = str(payload.get("seriesId") or "").strip()
@@ -1261,15 +1280,29 @@ def scanner_best_finish(
             preview_url=deps.preview_url,
         )
     original_path, display_path = best_candidate_paths(best)
-    if not original_path.is_file() or not display_path.is_file():
+    if not original_path.is_file():
         return best_finish_store_failure(series_id, series, status="failed",
                                          error="best candidate file is missing",
                                          best=best, project=project, preview_url=deps.preview_url)
     crop, ocr = best_crop_and_ocr(best)
+    # If the candidate only had a fast transient crop, execute full auto-crop now on the winning frame.
+    if not crop.get("path") or not Path(str(crop.get("path"))).is_file():
+        _crop_fn = auto_crop_receipt_fn if auto_crop_receipt_fn is not None else auto_crop_receipt
+        crop = _crop_fn(original_path)
+        display_path = capture_display_path(crop, original_path)
     ocr = refresh_best_ocr(ocr, original_path, display_path,
                            local_image_ocr=local_image_ocr_fn, truthy_env=truthy_env_fn)
     digest = str(best.get("sha256") or _file_sha256(original_path))
-    detected_document = best.get("detectedDocument") or {}
+    if extract_document_metadata_fn is not None:
+        detected_document = extract_document_metadata_fn(
+            str(ocr.get("text") or ""),
+            captured_at=str(best.get("capturedAt") or ""),
+            image_path=str(original_path),
+            use_llm=True,
+        )
+    else:
+        detected_document = best.get("detectedDocument") or {}
+    quality = document_frame_quality(crop, ocr, detected_document, display_path)
     try:
         document = archive_fn(
             display_path=display_path,
@@ -1278,6 +1311,7 @@ def scanner_best_finish(
             crop=crop,
             source_sha256=digest,
             captured_at=str(best.get("capturedAt") or ""),
+            metadata=detected_document,
         )
     except Exception as exc:  # noqa: BLE001
         document = {"ok": False, "error": str(exc), "metadata": detected_document}

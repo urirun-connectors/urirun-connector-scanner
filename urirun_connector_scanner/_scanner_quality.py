@@ -139,7 +139,14 @@ def document_frame_quality(crop: dict, ocr: dict, metadata: dict, display_path: 
         + ocr_quality_score(ocr, chars, reasons)
         + visual_quality_score(visual, reasons)
     )
-    document_like = bool(crop.get("ok") and (doc_type in {"paragon", "faktura", "rachunek", "potwierdzenie"} or chars >= 36))
+    document_like = bool(
+        crop.get("ok")
+        and (
+            doc_type in {"paragon", "faktura", "rachunek", "potwierdzenie"}
+            or chars >= 36
+            or float(crop.get("bboxArea") or 0.0) >= 0.08
+        )
+    )
     return {
         "score": round(max(0.0, score), 3),
         "documentLike": document_like,

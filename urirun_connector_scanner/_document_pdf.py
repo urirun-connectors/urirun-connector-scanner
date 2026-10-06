@@ -114,3 +114,13 @@ def write_document_pdf(image_path: str | Path, pdf_path: str | Path, *, metadata
         f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R /Info 9 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n".encode("ascii")
     )
     target.write_bytes(bytes(pdf))
+
+    try:
+        from wellmanifest_metafile import write_metafile, Metafile
+        full_meta = {**metadata}
+        if ocr_text and "text" not in full_meta:
+            full_meta["text"] = ocr_text
+        write_metafile(target, Metafile.from_dict(full_meta))
+    except Exception:
+        pass
+

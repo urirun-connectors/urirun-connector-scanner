@@ -1,0 +1,173 @@
+{
+  "schema": "new-project.intent/v3",
+  "ticket": "ticket-001",
+  "summary": "Adopt published native governance, pin reusable CI and publish the six preserved scanner source/test changes through one controlled ticket. SESSION_EXECUTION_AUTHORIZATION: continue fixes, tests, push and independent merge.",
+  "workstream": "integration",
+  "classification": {
+    "kind": "BUG",
+    "priority": "P1",
+    "origin": "requested"
+  },
+  "allowedPaths": [
+    ".aider.conf.yml",
+    ".cursor/rules/**",
+    ".env.example",
+    ".gitattributes",
+    ".githooks/**",
+    ".github/copilot-instructions.md",
+    ".github/reusable-workflows.lock.json",
+    ".github/reusable-workflows/connector-ci.yml",
+    ".github/workflows/ci.yml",
+    ".github/workflows/new-project-branch-hygiene.yml",
+    ".github/workflows/new-project-governance.yml",
+    ".gitignore",
+    ".governance/**",
+    ".subactor/**",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "GEMINI.md",
+    "LICENSE*",
+    "README.md",
+    "TODO.md",
+    "goal.yaml",
+    "project.bat",
+    "project.sh",
+    "project/**",
+    "project/TICKETS.md",
+    "project/ticket-001/**",
+    "pyproject.toml",
+    "scripts/install-agent-hosts.sh",
+    "scripts/runtime.sh",
+    "tests/test_document_sync.py",
+    "urirun_connector_scanner/_document_pdf.py",
+    "urirun_connector_scanner/_scanner_quality.py",
+    "urirun_connector_scanner/document_metadata.py",
+    "urirun_connector_scanner/document_sync.py",
+    "urirun_connector_scanner/scanner_bridge.py",
+    "wellmanifest_governance.py",
+    "worktree-guard.yaml"
+  ],
+  "forbiddenPaths": [
+    "project/ticket-*/user-*.md"
+  ],
+  "stacks": [],
+  "dependsOn": [],
+  "conflictsWith": [],
+  "integrationTicket": null,
+  "delivery": {
+    "acceptedBaseSha": "ce49e145a49655f77fb997bf28c45cac90074188",
+    "targetBranch": "main",
+    "outcome": "Publish immutable native adoption, actual reusable CI checks and all six preserved scanner file changes through one native exact-base/head protected PR.",
+    "nonGoals": [
+      "No changes to preserved scanner behavior or bytes during delivery intake",
+      "No foreign cleanup or self-granted review/merge authority"
+    ],
+    "complexity": "L",
+    "estimatedMinutes": 90,
+    "budgets": {
+      "maxImplementationFiles": 15,
+      "maxAffectedComponents": 3,
+      "maxPublicInterfaceChanges": 2,
+      "maxRuntimeDependencies": 0
+    },
+    "architecture": {
+      "status": "accepted",
+      "decision": "Use published v0.20.88, retain exact standard and preserved intake ownership extensions, pin the authentic callee and consolidate only this new unpublished native branch to the real remote base. Preserve the original primary and verified Git bundle. Bind package validation metadata in its integration owner; use the existing null-to-published-SHA atomic standardAdoption contract for managed payload accounting.",
+      "components": [
+        {
+          "name": "immutable-native-adoption",
+          "paths": [
+            ".aider.conf.yml",
+            ".cursor/rules/**",
+            ".githooks/**",
+            ".github/copilot-instructions.md",
+            ".github/workflows/new-project-governance.yml",
+            ".gitignore",
+            ".governance/**",
+            ".subactor/**",
+            "AGENTS.md",
+            "CLAUDE.md",
+            "GEMINI.md",
+            "README.md",
+            "TODO.md",
+            "CHANGELOG.md",
+            ".env.example",
+            "goal.yaml",
+            "LICENSE*",
+            "project.sh",
+            "project.bat",
+            "project/**",
+            "scripts/install-agent-hosts.sh",
+            "scripts/runtime.sh",
+            "wellmanifest_governance.py",
+            "worktree-guard.yaml",
+            ".github/workflows/ci.yml",
+            ".github/reusable-workflows/connector-ci.yml",
+            ".github/reusable-workflows.lock.json",
+            ".gitattributes",
+            ".github/workflows/new-project-branch-hygiene.yml",
+            "pyproject.toml"
+          ]
+        },
+        {
+          "name": "preserved-scanner-delivery",
+          "paths": [
+            "tests/test_document_sync.py",
+            "urirun_connector_scanner/_document_pdf.py",
+            "urirun_connector_scanner/_scanner_quality.py",
+            "urirun_connector_scanner/document_metadata.py",
+            "urirun_connector_scanner/document_sync.py",
+            "urirun_connector_scanner/scanner_bridge.py"
+          ]
+        }
+      ],
+      "responsibilityChanges": false,
+      "interfaceChanges": [
+        "Pinned reusable CI contract",
+        "Governed publication of preserved scanner intake"
+      ],
+      "dataChanges": [],
+      "ui": {
+        "impact": "none",
+        "states": [],
+        "evidence": []
+      },
+      "rollback": "Preserve original primary HEAD and recovery bundle; use independently reviewed corrective publication."
+    },
+    "runtimeDependencies": [],
+    "validation": [
+      {
+        "criterion": "AC-01",
+        "commands": [
+          "Native allocation, owner handoff and controller CAS readback"
+        ],
+        "evidence": "Real canonical checkout and fresh matching fenced scope; preserve original source and recovery bundle."
+      },
+      {
+        "criterion": "AC-02",
+        "commands": [
+          "Published immutable adopter",
+          "python3 .governance/check_required_checks.py --root .",
+          "project/governance-check.sh",
+          "URIRUN_CONTRACT_CHECK=1 python -m pytest -q"
+        ],
+        "evidence": "Actual CI contract, native scope and real connector tests pass."
+      },
+      {
+        "criterion": "AC-03",
+        "commands": [
+          "Managed Goal pull-request delivery",
+          "Protected OneDev/Validator invocation",
+          "GitHub merge readback and owned cleanup audit"
+        ],
+        "evidence": "Independent exact-head/base publication with deployed profile and actual checks."
+      }
+    ],
+    "standardAdoption": {
+      "sourceRepository": "wellmanifest/new-project",
+      "fromRevision": null,
+      "toRevision": "871350362e64398bba642e41356116a3321697bb"
+    }
+  }
+}

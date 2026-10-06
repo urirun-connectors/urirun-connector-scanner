@@ -181,13 +181,17 @@ def _parse_document_date(text: str, fallback: str | None = None) -> str:
 
 def _parse_amount(text: str) -> dict:
     amount_re = re.compile(r"(?<!\d)(\d{1,3}(?:[ \u00a0]?\d{3})*(?:[,.]\d{2})|\d+[,.]\d{2})(?!\d)")
-    keyword_re = re.compile(r"(razem|suma|do zaplaty|do zapłaty|naleznosc|należność|total|kwota|brutto)", re.I)
+    total_re = re.compile(r"(suma\s*pln|do\s*zap[lł]aty|razem\s*pln|razem|total\s*pln|warto[sś][cć]\s*brutto|nale[zż]no[sś][cć])", re.I)
+    keyword_re = re.compile(r"(suma|do zaplaty|do zapłaty|naleznosc|należność|total|kwota|brutto)", re.I)
+    tax_re = re.compile(r"(ptu|stawka\s*ptu|suma\s*ptu|vat\b|stawka\s*vat|opust|rabat|netto)", re.I)
     date_context_re = re.compile(r"\b(data|date|godzina|hour|czas|time)\b", re.I)
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     matches: list[tuple[int, float, str]] = []
     for idx, line in enumerate(lines):
+        is_total = bool(total_re.search(line))
+        is_tax = bool(tax_re.search(line))
         has_amount_keyword = bool(keyword_re.search(line))
-        if date_context_re.search(line) and not has_amount_keyword:
+        if date_context_re.search(line) and not (is_total or has_amount_keyword):
             continue
         for raw in amount_re.findall(line):
             normalized = raw.replace("\u00a0", "").replace(" ", "").replace(",", ".")
@@ -195,7 +199,14 @@ def _parse_amount(text: str) -> dict:
                 value = float(normalized)
             except ValueError:
                 continue
-            score = 10 if has_amount_keyword else 0
+            if is_total:
+                score = 50
+            elif is_tax:
+                score = -10
+            elif has_amount_keyword:
+                score = 15
+            else:
+                score = 0
             matches.append((score + idx, value, raw))
     if not matches:
         return {"amount": "", "currency": ""}
@@ -210,6 +221,18 @@ def _document_type(text: str) -> str:
         return "faktura"
     if "rachunek" in lower or "bill" in lower:
         return "rachunek"
+    if "gwarancj" in lower:
+        return "gwarancja"
+    if "reklamacj" in lower:
+        return "reklamacja"
+    if "odstąpieni" in lower or "odstapieni" in lower:
+        return "odstapienie"
+    if "regulamin" in lower or "terms of service" in lower or "terms & conditions" in lower:
+        return "regulamin"
+    if "polityka prywatno" in lower or "privacy policy" in lower:
+        return "polityka_prywatnosci"
+    if any(k in lower for k in ("umowa o pracę", "umowa zlecenie", "umowa o dzieło", "umowa najmu", "umowa ramowa", "umowa spółki", "umowa sprzedaży", "umowa agencyjna")):
+        return "umowa"
     payment_terms = ("contactless", "terminal", "karta", "kart", "obciazyc", "obciążyć", "eplatnosci", "epłatności")
     if any(term in lower for term in payment_terms):
         return "potwierdzenie"
