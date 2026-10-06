@@ -78,6 +78,15 @@ def document_sync_default_node() -> str:
     return os.environ.get("URIRUN_DOCUMENT_SYNC_NODE", "").strip()
 
 
+def document_scan_input_dir() -> Path | None:
+    raw = os.environ.get("URIRUN_SCAN_INPUT_DIR") or os.environ.get("URIRUN_DOCUMENT_SCAN_INPUT")
+    if raw:
+        p = Path(raw).expanduser().resolve()
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Pure utilities — no host_dashboard dependencies
 # --------------------------------------------------------------------------- #
@@ -1200,7 +1209,8 @@ def _compute_document_tokens(
     phash = _image_phash(display_path)
     month = archive_month(extracted)
     root = document_archive_root()
-    archive_dir = root / month
+    staging = document_scan_input_dir()
+    archive_dir = staging if staging else (root / month)
     filename = document_filename_with_id(canonical_document_filename(extracted), doc_id)
     return (ocr_text, extracted, docid_info, doc_id,
             text_sha256, fingerprint, dhash, phash,
@@ -1337,6 +1347,24 @@ def archive_scanned_document(
             "ocrChars": ocr.get("chars"),
             "metadata": extracted,
         })
+        remote_sync_result = None
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                target_node, target_url, target_token = resolve_node_endpoint("lenovo")
+                if target_url:
+                    date_val = str(extracted.get("date") or "")
+                    m_per = re.search(r"(\d{4})[-.](\d{2})", date_val)
+                    period_dot = f"{m_per.group(1)}.{m_per.group(2)}" if m_per else time.strftime("%Y.%m")
+                    doc_type = str(extracted.get("type") or "paragon").lower()
+                    subfolder = "koszty" if doc_type in ("paragon", "rachunek", "faktura") else "inne"
+                    remote_root = os.environ.get("URIRUN_REMOTE_DEST_ROOT", "~/Documents/Faktury")
+                    remote_dest = f"{remote_root.rstrip('/')}/{period_dot}/{subfolder}"
+                    res_pdf = upload_document_to_node(target_url, f"{remote_dest}/{pdf_path.name}", pdf_path.read_bytes(), token=target_token)
+                    if json_path.is_file():
+                        upload_document_to_node(target_url, f"{remote_dest}/{json_path.name}", json_path.read_bytes(), token=target_token)
+                    remote_sync_result = {"node": target_node, "dest": remote_dest, "pdf": res_pdf.get("ok", False)}
+            except Exception as sync_exc:
+                remote_sync_result = {"error": str(sync_exc)}
     return {
         "ok": True,
         "duplicate": False,
@@ -1348,6 +1376,7 @@ def archive_scanned_document(
         "jsonPath": str(json_path),
         "uri": entry["uri"],
         "metadata": extracted,
+        "remoteSync": remote_sync_result,
         "indexPath": str(document_index_path()),
         "scannedIdLogPath": str(scanned_id_log_path()),
     }
@@ -1375,4 +1404,290 @@ def reconcile_document_index() -> dict:
             {"docId": p.get("docId"), "pdfPath": p.get("pdfPath"), "jsonPath": p.get("jsonPath")}
             for p in pruned
         ],
+    }
+
+
+def resolve_node_endpoint(node: str | None = None, node_url: str | None = None) -> tuple[str, str, str | None]:
+    """Resolve (node_name, node_url, token) for remote dispatch."""
+    target_node = (node or os.environ.get("URIRUN_DOCUMENT_SYNC_NODE") or "lenovo").strip()
+    target_url = (node_url or "").strip()
+    if not target_url:
+        nodes_file = Path("~/.urirun/nodes.json").expanduser()
+        if nodes_file.is_file():
+            try:
+                mapping = json.loads(nodes_file.read_text(encoding="utf-8"))
+                target_url = str(mapping.get(target_node) or "").strip()
+            except Exception:
+                pass
+    if not target_url and target_node in {"lenovo", "laptop"}:
+        target_url = "http://192.168.188.201:8765"
+
+    token = None
+    try:
+        import keyring
+        token = keyring.get_password("urirun-node-token", target_node)
+    except Exception:
+        pass
+    if not token and target_node in {"lenovo", "laptop"}:
+        token = "123456"
+
+    return target_node, target_url, token
+
+
+def upload_document_to_node(
+    node_url: str,
+    remote_path: str,
+    data: bytes,
+    *,
+    token: str | None = None,
+    overwrite: bool = True,
+    make_dirs: bool = True,
+    timeout: float = 30.0,
+) -> dict:
+    """Upload a file to remote node using fs:// file transfer route."""
+    import urllib.request
+
+    expected_sha = hashlib.sha256(data).hexdigest()
+    last_err = "no routes attempted"
+    for fs_uri in ("fs://laptop/file/command/write-b64", "fs://host/file/command/write-b64"):
+        body = json.dumps({
+            "uri": fs_uri,
+            "payload": {
+                "path": remote_path,
+                "bytes_b64": base64.b64encode(data).decode("ascii"),
+                "overwrite": overwrite,
+                "make_dirs": make_dirs,
+            },
+        }).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["X-Urirun-Token"] = token
+        req = urllib.request.Request(f"{node_url.rstrip('/')}/run", data=body, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                res = json.loads(resp.read().decode("utf-8"))
+                val = res.get("value") or (res.get("result") or {}).get("value") or {}
+                if res.get("ok") and (val.get("ok") or "sha256" in val):
+                    return {
+                        "ok": True,
+                        "path": val.get("path") or remote_path,
+                        "sha256": val.get("sha256") or expected_sha,
+                        "verified": (val.get("sha256") == expected_sha),
+                    }
+                if not res.get("ok") and res.get("error"):
+                    last_err = str(res["error"])
+        except Exception as exc:
+            last_err = str(exc)
+            continue
+    return {"ok": False, "error": last_err}
+
+
+def sync_folder_to_node(
+    source_dir: str | Path,
+    *,
+    node: str = "lenovo",
+    dest_root: str = "~/Documents/Faktury",
+    pattern: str = "**/*",
+    node_url: str | None = None,
+    token: str | None = None,
+) -> dict:
+    """Sync an existing local folder to a target directory on a remote node."""
+    src = Path(source_dir).expanduser().resolve()
+    target_node, target_url, target_token = resolve_node_endpoint(node, node_url)
+    resolved_token = token or target_token
+    if not target_url:
+        return {"ok": False, "error": f"could not resolve URL for node {target_node}"}
+
+    files = [f for f in sorted(src.glob(pattern)) if f.is_file()]
+    transferred = []
+    errors = []
+    for f in files:
+        rel = f.relative_to(src).as_posix()
+        remote_path = f"{dest_root.rstrip('/')}/{rel}"
+        data = f.read_bytes()
+        res = upload_document_to_node(target_url, remote_path, data, token=resolved_token)
+        if res.get("ok"):
+            transferred.append({"source": str(f), "remote": remote_path, "sha256": res.get("sha256")})
+        else:
+            errors.append({"source": str(f), "error": res.get("error")})
+
+    return {
+        "ok": len(errors) == 0,
+        "node": target_node,
+        "nodeUrl": target_url,
+        "destRoot": dest_root,
+        "total": len(files),
+        "transferred": len(transferred),
+        "failed": len(errors),
+        "files": transferred,
+        "errors": errors,
+    }
+
+
+def route_scanned_documents(payload: dict | None = None) -> dict:
+    """Process scanned documents from scan-input staging folder and route them to target accounting folders.
+
+    URI: proc://fin/scanner/route/v1 or document://host/archive/command/route-scans
+    JSON input:
+    {
+      "scan_input_dir": "~/Documents/Faktury/scan-input",
+      "dest_root": "~/Documents/Faktury",
+      "doc_id": "...",     # optional filter
+      "filename": "...",   # optional filter
+      "copy_only": false,  # default false: move files
+      "subfolder": "koszty", # optional: override subfolder
+      "node": "lenovo",    # target node (default: lenovo or env URIRUN_DOCUMENT_SYNC_NODE)
+      "sync_to_node": true # transfer to destination node (default: true)
+    }
+    """
+    import shutil
+    payload = payload or {}
+    scan_input_raw = payload.get("scan_input_dir") or os.environ.get("URIRUN_SCAN_INPUT_DIR") or "~/Documents/Faktury/scan-input"
+    scan_input_dir = Path(scan_input_raw).expanduser().resolve()
+    dest_root_raw = payload.get("dest_root") or os.environ.get("FAKTURY_DIR") or "~/Documents/Faktury"
+    dest_root = Path(dest_root_raw).expanduser().resolve()
+    target_doc_id = payload.get("doc_id")
+    target_filename = payload.get("filename")
+    copy_only = bool(payload.get("copy_only", False))
+    override_subfolder = payload.get("subfolder")
+
+    # Node sync parameters
+    target_node_param = payload.get("node") if "node" in payload else payload.get("target_node")
+    sync_to_node = boolish(payload.get("sync_to_node"), default=True)
+    remote_dest_root = str(payload.get("remote_dest_root") or "~/Documents/Faktury").rstrip("/")
+    node_name, node_url, node_token = resolve_node_endpoint(target_node_param, payload.get("node_url"))
+
+    if not scan_input_dir.exists():
+        return {
+            "ok": True,
+            "status": "noop",
+            "message": f"Scan input directory does not exist: {scan_input_dir}",
+            "routed": [],
+            "count": 0,
+        }
+
+    routed = []
+    json_files = sorted(scan_input_dir.glob("*.json"))
+    for jf in json_files:
+        try:
+            meta = json.loads(jf.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(meta, dict):
+            continue
+
+        doc_id = meta.get("docId") or meta.get("id") or ""
+        if target_doc_id and doc_id != target_doc_id:
+            continue
+
+        pdf_file = jf.with_suffix(".pdf")
+        if target_filename and (pdf_file.name != target_filename and jf.name != target_filename):
+            continue
+
+        # Extract period from document date (e.g. 2026-09-07 -> 2026.09)
+        raw_date = str(meta.get("date") or meta.get("createdAt") or "")
+        m_match = re.search(r"(\d{4})[-.](\d{2})", raw_date)
+        if m_match:
+            period_dot = f"{m_match.group(1)}.{m_match.group(2)}"
+        else:
+            period_dot = time.strftime("%Y.%m")
+
+        doc_type = str(meta.get("type") or "").lower()
+        subfolder = override_subfolder
+        if not subfolder:
+            if "przych" in doc_type:
+                subfolder = "przychody"
+            elif doc_type in ("faktura", "paragon", "rachunek", "potwierdzenie", "koszty"):
+                subfolder = "koszty"
+            elif doc_type in ("umowa", "kontrakt"):
+                subfolder = "umowy"
+            elif doc_type in ("regulamin", "polityka_prywatnosci"):
+                subfolder = "regulaminy"
+            elif doc_type in ("gwarancja", "reklamacja", "odstapienie"):
+                subfolder = "zalaczniki"
+            else:
+                subfolder = "koszty"
+
+        target_month_dir = dest_root / period_dot / subfolder
+        target_month_dir.mkdir(parents=True, exist_ok=True)
+
+        target_pdf = target_month_dir / pdf_file.name if pdf_file.exists() else None
+        target_json = target_month_dir / jf.name
+
+        # Transfer PDF
+        if pdf_file.exists():
+            if copy_only:
+                shutil.copy2(pdf_file, target_pdf)
+            else:
+                shutil.move(pdf_file, target_pdf)
+
+        # Update metadata paths and transfer sidecar JSON
+        meta["routedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        meta["routedTo"] = str(target_month_dir)
+        if target_pdf:
+            meta["pdfPath"] = str(target_pdf)
+        meta["jsonPath"] = str(target_json)
+
+        target_json.write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        if target_pdf:
+            target_pdf.with_name(target_pdf.name + ".json").write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+            try:
+                from wellmanifest_metafile import write_metafile, Metafile
+                write_metafile(target_pdf, Metafile.from_dict(meta))
+            except Exception:
+                pass
+        if not copy_only and jf.exists():
+            jf.unlink(missing_ok=True)
+
+        # Transfer any matching image previews
+        target_img = None
+        for img_ext in (".jpg", ".jpeg", ".png", ".webp"):
+            img_candidate = jf.with_suffix(img_ext)
+            if img_candidate.exists():
+                target_img = target_month_dir / img_candidate.name
+                if copy_only:
+                    shutil.copy2(img_candidate, target_img)
+                else:
+                    shutil.move(img_candidate, target_img)
+
+        # Deliver to remote node if configured
+        remote_results: dict[str, Any] = {}
+        if sync_to_node and node_url:
+            if target_pdf and target_pdf.exists():
+                r_pdf_path = f"{remote_dest_root}/{period_dot}/{subfolder}/{target_pdf.name}"
+                res_pdf = upload_document_to_node(node_url, r_pdf_path, target_pdf.read_bytes(), token=node_token)
+                remote_results["pdf"] = res_pdf
+            if target_json.exists():
+                r_json_path = f"{remote_dest_root}/{period_dot}/{subfolder}/{target_json.name}"
+                res_json = upload_document_to_node(node_url, r_json_path, target_json.read_bytes(), token=node_token)
+                remote_results["json"] = res_json
+            if target_pdf and target_pdf.with_name(target_pdf.name + ".json").exists():
+                pj = target_pdf.with_name(target_pdf.name + ".json")
+                r_pj_path = f"{remote_dest_root}/{period_dot}/{subfolder}/{pj.name}"
+                upload_document_to_node(node_url, r_pj_path, pj.read_bytes(), token=node_token)
+            if target_img and target_img.exists():
+                r_img_path = f"{remote_dest_root}/{period_dot}/{subfolder}/{target_img.name}"
+                upload_document_to_node(node_url, r_img_path, target_img.read_bytes(), token=node_token)
+
+        routed.append({
+            "docId": doc_id,
+            "month": period_dot,
+            "subfolder": subfolder,
+            "pdf": str(target_pdf) if target_pdf else None,
+            "json": str(target_json),
+            "contractor": meta.get("contractor"),
+            "amount": meta.get("amount"),
+            "date": meta.get("date"),
+            "node": node_name if node_url else None,
+            "remote": remote_results if remote_results else None,
+        })
+
+    return {
+        "ok": True,
+        "status": "success",
+        "scan_input_dir": str(scan_input_dir),
+        "dest_root": str(dest_root),
+        "node": node_name if node_url else None,
+        "count": len(routed),
+        "routed": routed,
     }

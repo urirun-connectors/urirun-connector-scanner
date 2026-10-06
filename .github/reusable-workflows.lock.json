@@ -1,0 +1,10 @@
+{
+  "schema": "new-project.reusable-workflows/v1",
+  "workflows": [
+    {
+      "uses": "if-uri/urirun/.github/workflows/connector-ci.yml@6177af5fa4fa545f68a51a6ae27262af4099ea65",
+      "sourceFile": ".github/reusable-workflows/connector-ci.yml",
+      "sourceSha256": "fd529152bed750604ada36e0fe9ac32ce3e0b926c578af53bf12df505bdd1b3c"
+    }
+  ]
+}

@@ -115,3 +115,51 @@ def test_sync_verification_write_ack_mode():
         results = [{"relativePath": "2024-01/x.pdf", "writeOk": True, "verified": False}]
         v = document_sync_verification(files, results, source_root=root, read_back=False)
         assert v["mode"] == "write-ack-sha256"
+
+
+# ─── remote node sync & routing ──────────────────────────────────────────────
+
+def test_resolve_node_endpoint_defaults():
+    from urirun_connector_scanner.document_sync import resolve_node_endpoint
+    node, url, token = resolve_node_endpoint("lenovo")
+    assert node == "lenovo"
+    assert url == "http://192.168.188.201:8765"
+
+
+def test_route_scanned_documents_with_remote_node(monkeypatch):
+    import json
+    from urirun_connector_scanner.document_sync import route_scanned_documents
+
+    uploaded = []
+
+    def fake_upload(node_url, remote_path, data, **kwargs):
+        uploaded.append((node_url, remote_path, len(data)))
+        return {"ok": True, "path": remote_path, "sha256": "fake-sha", "verified": True}
+
+    monkeypatch.setattr("urirun_connector_scanner.document_sync.upload_document_to_node", fake_upload)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        staging = Path(tmpdir) / "scan-input"
+        staging.mkdir()
+        dest = Path(tmpdir) / "Faktury"
+        dest.mkdir()
+
+        jf = staging / "test_doc.json"
+        jf.write_text(json.dumps({"docId": "DOC-123", "date": "2026-07-15", "type": "faktura", "contractor": "Acme", "amount": 100}), encoding="utf-8")
+        pf = staging / "test_doc.pdf"
+        pf.write_bytes(b"%PDF-test")
+
+        res = route_scanned_documents({
+            "scan_input_dir": str(staging),
+            "dest_root": str(dest),
+            "node": "lenovo",
+            "node_url": "http://mock-node:8765",
+            "sync_to_node": True,
+        })
+
+        assert res["ok"] is True
+        assert res["count"] == 1
+        assert res["node"] == "lenovo"
+        assert len(uploaded) >= 2  # PDF and JSON uploaded to remote
+        assert any("2026.07/koszty/test_doc.pdf" in item[1] for item in uploaded)
+
